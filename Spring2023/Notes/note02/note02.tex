@@ -113,6 +113,10 @@ myKernel<<<gridSize, blockSize>>>();
 
 \end{lstlisting}
 
+为什么threadIdx, blockIdx, blockDim定位线程用xyz，而不用下角标123？
+
+使用x、y、z来定位线程的原因是因为CUDA C中的线程块和线程网格是一个三维的结构，每个维度都有对应的坐标。因此，使用x、y、z作为索引可以很方便地对应到每个维度。如果使用下角标123，则需要额外说明这些数字对应于哪个维度，更容易混淆和出错。同时，x、y、z也更符合空间坐标系的表示方法，更容易理解。
+
 PTX是一种中间表示语言，用于将CUDA程序源代码转换为适用于不同GPU架构的机器代码。PTX代码可以被JIT（Just-In-Time）编译器或静态编译器编译为适用于特定GPU架构的机器代码。由于PTX是一种中间表示语言，因此它可以跨不同的GPU架构进行优化和转换，从而提高程序的可移植性和性能。
 
 \newpage
@@ -183,5 +187,188 @@ Programing Massively Parallel Processors :  Chapter 2.
 \end{equation}
 
 如果我们将输入视为一个以 RGB 值组织的图像数组 I，输出为相应的亮度值数组 O，我们可以得到如图2.2所示的简单计算结构。例如，O [0] 是通过根据上述公式计算 I [0] 中的 RGB 值的加权和来生成的；O [1] 是通过计算 I [1] 中的 RGB 值的加权和生成的，O [2] 是通过计算 I [2] 中的 RGB 值的加权和生成的，以此类推。这些像素级计算中的任何一个都不依赖于其他计算；所有计算都可以独立执行。显然，颜色到灰度的转换展现了丰富的数据并行性。当然，完整应用程序中的数据并行性可能更为复杂，本书的大部分内容都致力于教授发现和利用数据并行性所需的“并行思维”。
+
+\subsection{A VECTOR ADDITION KERNE}
+
+A simple traditional vector addition C code example.
+
+
+\begin{lstlisting}
+#include <cuda.h>
+…
+void vecAdd(float* A, float* B, float* C, int n)
+{
+	int size = n* sizeof(float);
+	float *d_A *d_B, *d_C;
+	…
+	1. // Allocate device memory for A, B, and C
+	// copy A and B to device memory
+	2. // Kernel launch code – to have the device
+	// to perform the actual vector addition
+	3. // copy C from the device memory
+	// Free device vectors
+}	
+\end{lstlisting}
+
+
+\subsection{Device global memory and data transfer}
+
+We now use a simple code example to illustrate the use of cudaMalloc.
+
+\begin{lstlisting}
+float *d_A;
+int size=n * sizeof(float);
+cudaMalloc((void**)&d_A, size);
+...
+cudaFree(d_A);
+	
+\end{lstlisting}
+
+为了清晰起见，我们将一个指针变量以字母“d\_”开头，表示它指向设备内存中的一个对象。程序将指针d\_A的地址（即\&d\_A）作为void指针进行转换后，作为第一个参数传递。也就是说，d\_A将指向为A向量分配的设备内存区域。分配区域的大小将是n个单精度浮点数的大小，这在今天的大多数计算机上是4个字节。在计算完成后，使用指针d\_A作为输入调用cudaFree以释放A向量的存储空间，从设备全局内存中释放它。请注意，cudaFree不需要更改指针变量d\_A的内容；它只需要使用d\_A的值将已分配的内存重新输入可用池中。因此，只传递值，而不是d\_A的地址作为参数。
+
+\textbf{指针d\_A的变化：}
+
+在调用 cudaMalloc 函数之前，指针 d\_A 是未初始化的，也就是不指向任何一个内存地址。因此，在使用 d\_A 之前需要先为它分配内存，否则访问该指针可能会导致未定义的行为。在 cudaMalloc 函数被调用之后，d\_A 将会指向分配给 A 向量的设备内存地址。在 cudaFree 函数被调用之后，d\_A 将会变成未初始化的状态，也就是不再指向任何有效的内存地址。
+
+cudaMemcpy函数有四个参数。第一个参数是指向要复制的数据对象目标位置的指针。第二个参数指向源位置。第三个参数指定要复制的字节数。第四个参数指示复制涉及的内存类型：从主机内存到主机内存，从主机内存到设备内存，从设备内存到主机内存和从设备内存到设备内存。例如，内存复制函数可以用于将数据从设备内存的一个位置复制到设备内存的另一个位置。\\
+
+cudaMemcpy()
+
+\begin{itemize}
+	\item Memory data transfer
+	\item Requires four parameters
+	\begin{itemize}
+		\item[$\circ$] Pointer to destination
+		\item[$\circ$] Pointer to source
+		\item[$\circ$] Number of bytes copied
+		\item [$\circ$] Type/Direction of transfer
+		\end{itemize}
+\end{itemize}
+
+\begin{lstlisting}
+cudaMemcpy(d_A, A, size, cudaMemcpyHostToDevice);
+cudaMemcpy(d_B, B, size, cudaMemcpyHostToDevice);
+cudaMemcpy(C, d_C, size, cudaMemcpyDeviceToHost);
+\end{lstlisting}
+
+
+
+请注意，目前cudaMemcpy不能在多GPU系统中用于在不同GPU之间复制数据。
+
+We show a more complete version of the vecAdd function.
+
+\begin{lstlisting}
+void vecAdd(float* h_A, float* h_B, float* h_c, int n){
+	int size = n * sizeof(float);
+	float *d_A, *d_B, *d_C;
+	
+	cudaMalloc ((void **)   &d_A,    size);
+	cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice);
+	cudaMalloc ((void **)   &d_B,    size);
+	cudaMallocpy(d_B, h_B, size, cudaMemcpyHostToDevice);
+	
+	cudaMalloc((void **)   &d_C,  size);
+	
+	// Kernel invocation code - to be shown later
+	...
+	
+	cudaMallocpy(d_B, h_B, size, cudaMemcpyHostToDevice);
+	// Free device memory for A, B, C
+	cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
+} 
+\end{lstlisting}
+
+代码错误检查
+
+\begin{lstlisting}
+cudaError_t err=cudaMalloc((void **) &d_A, size);
+if (error !=cudaSuccess) {
+	printf(“%s in %s at line %d\n”, cudaGetErrorString(err),__
+	FILE__,__LINE__);
+	exit(EXIT_FAILURE);
+}
+\end{lstlisting}
+
+
+\subsection{KERNEL FUNCTIONS AND THREADING}
+
+
+\begin{lstlisting}
+// Compute vector sum C = A+B
+// Each thread performs one pair-wise addition
+__global__
+void vecAddKernel(float* A, float* B, float* C, int n)
+{
+	int i = blockDim.x*blockIdx.x + threadIdx.x;
+	if(i<n) C[i] = A[i] + B[i];
+}
+\end{lstlisting}
+
+
+
+
+\begin{lstlisting}
+int vectAdd(float* A, float* B, float* C, int n)
+{
+	// d_A, d_B, d_C allocations and copies omitted
+	// Run ceil(n/256) blocks of 256 threads each
+	vecAddKernel<<<ceil(n/256.0), 256>>>(d_A, d_B, d_C, n);
+}
+\end{lstlisting}
+
+解释一下为什么用ceil：
+
+在CUDA中，每个线程块的大小通常是固定的，因为它们是在GPU的多处理器上执行的。在这个例子中，每个线程块的大小被设置为256个线程。
+
+但是，当需要处理的向量长度不是256的整数倍时，就需要计算需要多少个线程块来处理所有的数据。为了确保处理所有的数据，需要向上取整到最近的整数块数。
+
+因此，ceil(n/256.0)被用来计算所需的线程块数，并向上取整以确保所有的数据都被处理。
+
+\subsection{KERNEL LAUNCH}
+
+A complete version of the host code in the vecAdd.function.
+
+\begin{lstlisting}
+	void vecAdd(float* h_A, float* h_B, float* h_c, int n){
+		int size = n * sizeof(float);
+		float *d_A, *d_B, *d_C;
+		
+		cudaMalloc ((void **)   &d_A,    size);
+		cudaMemcpy(d_A, h_A, size, cudaMemcpyHostToDevice);
+		cudaMalloc ((void **)   &d_B,    size);
+		cudaMallocpy(d_B, h_B, size, cudaMemcpyHostToDevice);
+		
+		cudaMalloc((void **)   &d_C,  size);
+		
+		vecAddKernel<<<ceil(n/256.0), 256>>>(d_A, d_B, d_C, n);
+		
+		cudaMallocpy(d_B, h_B, size, cudaMemcpyHostToDevice);
+		// Free device memory for A, B, C
+		cudaFree(d_A); cudaFree(d_B); cudaFree(d_C);
+	} 
+
+// Compute vector sum C = A+B
+// Each thread performs one pair-wise addition
+__global__
+void vecAddKernel(float* A, float* B, float* C, int n)
+{
+	int i = blockDim.x*blockIdx.x + threadIdx.x;
+	if(i<n) C[i] = A[i] + B[i];
+}
+
+\end{lstlisting}
+
+\subsection{SUMMARY}
+
+本章提供了CUDA C编程模型的快速简化概述。CUDA C扩展了C语言以支持并行计算。我们在本章讨论了其中一个基本子集。为了方便起见，我们将在下面总结我们在本章中讨论过的扩展：
+\begin{itemize}
+	\item \_global\_函数：在设备上执行的函数，由主机调用。
+	\item threadIdx, blockIdx, blockDim：内置的线程索引和块索引变量，可用于访问线程和块的ID。
+	\item $<<<gridDim, blockDim>>>$：用于指定要在设备上执行的内核函数的线程块和线程数。
+	\item cudaMalloc和cudaFree：用于在设备上分配和释放内存。
+	\item cudaMemcpy：用于在主机和设备之间复制内存。
+	\item 向量加法示例：展示了如何使用CUDA C实现简单的并行计算。
+\end{itemize}
+
 
 \end{document}
