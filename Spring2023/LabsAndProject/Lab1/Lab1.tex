@@ -1,0 +1,103 @@
+%! Author = zhenxiang
+%! Date = 23-3-25
+\PassOptionsToPackage{quiet}{xeCJK}  % 抑制无意义的警告
+% Preamble
+\documentclass[11pt]{ctexart}
+
+% Packages
+\usepackage{amsmath}
+% graphicx
+\usepackage{graphicx}
+% 页面设置
+\usepackage{geometry}
+\geometry{left=2.5cm, right=2.5cm, top=2.5cm, bottom=2.5cm}
+% codes
+\usepackage{ listings}
+\usepackage{xcolor}
+\usepackage{color}
+\definecolor{mygreen}{rgb}{0,0.6,0}
+\definecolor{mygray}{rgb}{0.5,0.5,0.5}
+\definecolor{mymauve}{rgb}{0.58,0,0.82}
+\lstset{ %
+	backgroundcolor=\color{white},   % choose the background color; you must add \usepackage{color} or \usepackage{xcolor}
+	basicstyle=\ttfamily,            % the size of the fonts that are used for the code
+	breakatwhitespace=false,         % sets if automatic breaks should only happen at whitespace
+	breaklines=true,                 % sets automatic line breaking
+	captionpos=b,                    % sets the caption-position to bottom
+	commentstyle=\ttfamily\color{mygreen},    
+	% comment style
+	deletekeywords={},               % if you want to delete keywords from the given language
+	escapeinside={},                 % if you want to add LaTeX within your code
+	extendedchars=true,              % lets you use non-ASCII characters; for 8-bits encodings only, does not work with UTF-8
+	frame=single,                    % adds a frame around the code
+	keepspaces=true,                 % keeps spaces in text, useful for keeping indentation of code (possibly needs columns=flexible)
+	keywordstyle=\color{blue},       % keyword style
+	language=C++,                    % the language of the code
+	morekeywords={},                 % if you want to add more keywords to the set
+	numbers=left,                    % where to put the line-numbers; possible values are (none, left, right)
+	numbersep=5pt,                   % how far the line-numbers are from the code
+	numberstyle=\tiny\color{mygray}, % the style that is used for the line-numbers
+	rulecolor=\color{black},         % if not set, the frame-color may be changed on line-breaks within not-black text (e.g. comments (green here))
+	showspaces=false,                % show spaces everywhere adding particular underscores; it overrides 'showstringspaces'
+	showstringspaces=false,          % underline spaces within strings only
+	showtabs=false,                  % show tabs within strings adding particular underscores
+	stepnumber=1,                    % the step between two line-numbers. If it's 1, each line will be numbered
+	stringstyle=\color{mymauve},     % string literal style
+	tabsize=2,                       % sets default tabsize to 2 spaces
+	title=\lstname                   % show the filename of files included with \lstinputlisting; also try caption instead of title
+}
+
+% Document
+\begin{document}
+
+
+
+\section{Prerequisites}
+\begin{itemize}
+	\item You have completed all week 1 lectures or videos
+	\item You have completed Lab0 (MP0)
+	\item \textbf{Chapter 2 }of the text book would also be helpful
+\end{itemize}
+
+\section{环境配置}
+根据目录中的rai\_build.yml反推出makefile文件内容：
+
+\begin{lstlisting}
+	WB = ${WB_DIR}
+	.DEFAULT_GOAL := cleanall
+	.PHONY: clean cleanall
+	all: template
+	
+	template: template.cu
+	nvcc -std=c++11 -rdc=true -I $(WB) -c template.cu -o template.o
+	nvcc -std=c++11 -o template template.o $(WB)/lib/libwb.so
+	bash run_datasets
+	clean:
+	-rm -f template.o
+	
+	
+	cleanall: clean
+	rm -f template
+	
+	
+\end{lstlisting}
+
+\section{Instruction}
+\begin{itemize}
+	\item You should edit the code in `template.cu` to perform the following:
+	\begin{itemize}
+		\item[$\circ$] Allocate device memory
+		\item[$\circ$] Copy host memory to device
+		\item[$\circ$] Initialize thread block and kernel grid dimensions
+		\item[$\circ$] Invoke CUDA kernel
+		\item[$\circ$] Copy results from device to host
+		\item[$\circ$] Free device memory
+		\item[$\circ$]  Write the CUDA kernel
+	\end{itemize}
+\end{itemize}
+
+Instructions about where to place each part of the code is
+demarcated by the `//@@` comment lines.
+
+
+\end{document}
