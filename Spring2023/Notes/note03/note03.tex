@@ -206,4 +206,171 @@ Analogously, we should expect that the picture processing kernel function will h
 }
 \end{lstlisting}
 
+\subsection{SYNCHRONIZATION AND TRANSPARENT SCALABILITY}
+
+We have discussed thus far how to launch a kernel for execution by a grid of threads
+and how to map threads to parts of the data structure. However, we have not yet presented any means to coordinate the execution of multiple threads. We will now study a basic coordination mechanism. CUDA allows threads in the same block to coordinate their activities by using a barrier synchronization function \_\_syncthreads() . Note that “\_\_” consists of two “\_” characters. When a thread calls \_\_syncthreads() , it will be held at the calling location until every thread in the block reaches the location. This process ensures that all threads in a block have completed a phase of their execution of the kernel before any of them can proceed to the next phase. Barrier synchronization is a simple and popular method for coordinating parallel activities.
+
+In CUDA, a \_\_syncthreads() statement, if present, must be executed by all threads
+in a block. When a \_\_syncthread() statement is placed in an if -statement, either all or none of the threads in a block execute the path that includes the \_\_syncthreads() . For an if-then-else statement, if each path has a \_\_syncthreads() statement, either all threads in a block execute the then -path or all of them execute the else -path. The two \_\_syncthreads() are different barrier synchronization points. If a thread in a block executes the then -path and another executes the else -path, they would be waiting at different barrier synchronization points. They would end up waiting for each other forever. It is the responsibility of the programmers to write their code so that these requirements are satisfied.
+
+The ability to synchronize also imposes execution constraints on threads within a
+block. These threads should execute in close temporal proximity with each other to
+avoid excessively long waiting times. In fact, one needs to make sure that all threads
+involved in the barrier synchronization have access to the necessary resources to eventually arrive at the barrier. Otherwise, a thread that never arrives at the barrier synchronization point can cause everyone else to wait forever. CUDA runtime systems satisfy this constraint by assigning execution resources to all threads in a block as a unit. A block can begin execution only when the runtime system has secured all resources needed for all threads in the block to complete execution. When a thread of a block is assigned to an execution resource, all other threads in the same block are also assigned to the same resource. This condition ensures the temporal proximity of all threads in a block and prevents excessive or indefinite waiting time during barrier synchronization.
+
+This leads us to an important tradeoff in the design of CUDA barrier synchronization. By not allowing threads in different blocks to perform barrier synchronization
+with each other, the CUDA runtime system can execute blocks in any order relative
+to each other because none of them need to wait for each other. This flexibility ena-
+bles scalable implementations as shown in Fig. 3.11, where time progresses from top
+to bottom. In a low-cost system with only a few execution resources, one can execute
+a small number of blocks simultaneously, portrayed as executing two blocks at a time
+on the left hand side of Fig. 3.11. In a high-end implementation with more execution
+resources, one can execute a large number of blocks simultaneously, shown as four
+blocks at a time on the right hand side of Fig. 3.11.
+
+% 图片置于当前位置
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=1.0\textwidth]{photos/Lackofsynchronizationconstraints.png}
+	\caption{Lackofsynchronizationconstraints.png}
+	\label{fig:2}
+\end{figure}
+
+
+\subsection{RESOURCE ASSIGNMENT}
+
+% 图片置于当前位置
+\begin{figure}[ht]
+	\centering
+	\includegraphics[width=1.0\textwidth]{photos/ThreadblockassignmenttoStreamingMultiprocessors.png}
+	\caption{ThreadblockassignmenttoStreamingMultiprocessors.png}
+	\label{fig:3}
+\end{figure}
+
+
+
+Once a kernel is launched, the CUDA runtime system generates the corresponding grid of threads. As discussed in the previous section, these threads are assigned to execution resources on a block-by-block basis. In the current generation of hardware, the execution resources are organized into Streaming Multiprocessors (SMs).
+Fig. 3.12 illustrates that multiple thread blocks can be assigned to each SM. Each device sets a limit on the number of blocks that can be assigned to each SM. For instance, let us consider a CUDA device that may allow up to 8 blocks to be assigned to each SM. In situations where there is shortage of one or more types of resources needed for the simultaneous execution of 8 blocks, the CUDA runtime automatically reduces the number of blocks assigned to each SM until their combined resource usage falls below the limit. With limited numbers of SMs and limited numbers of blocks that can be assigned to each SM, the number of blocks that can be actively executing in a CUDA device is limited as well. Most grids contain many more blocks than this number. The runtime system maintains a list of blocks that need to execute and assigns new blocks to SMs as previously assigned blocks complete execution.
+Fig. 3.12 shows an example in which three thread blocks are assigned to each SM.
+One of the SM resource limitations is the number of threads that can be simultaneously tracked and scheduled. It takes hardware resources (built-in registers) for SMs to maintain the thread and block indexes and track their execution status. Therefore,
+each generation of hardware sets a limit on the number of blocks and number of threads that can be assigned to an SM. For instance in the Fermi architecture, up to 8 blocks and 1536 threads can be assigned to each SM. This could be in the form of
+6 blocks of 256 threads each, 3 blocks of 512 threads each, and so on. If the device only allows up to 8 blocks in an SM, it should be obvious that 12 blocks of 128 threads each is not a viable option. If a CUDA device has 30 SMs, and each SM can accommodate up to 1536 threads, the device can have up to 46,080 threads simultaneously residing in the CUDA device for execution.
+
+Q: 
+SM和线程的联系是什么？
+
+A: 
+在CUDA架构中，GPU的计算资源被组织成为一个个的Streaming Multiprocessors（SMs）。每个SM包含一组指令集、寄存器和其他硬件资源，可以同时处理多个线程块（thread blocks）中的线程（threads）。
+
+线程是GPU并行计算的基本单元。一个线程块（thread block）是一组线程的集合，这些线程可以在同一个SM上并行执行。当一个CUDA内核启动时，系统会生成相应的线程网格。这些线程根据线程块的大小和分配方式被分配到SM上进行执行。
+
+SM和线程之间的联系是，SM是GPU硬件上的执行单元，可以处理多个线程块中的线程。每个SM包含有限的资源，如寄存器和共享内存等，需要被分配给线程块中的线程使用。CUDA运行时系统会根据每个SM的资源限制，自动调整分配给每个SM的线程块数量，以确保所有线程可以被正确地分配和执行。因此，SM的数量和每个SM可以同时执行的线程数是GPU并行计算的两个重要的硬件限制。
+
+\subsection{QUERYING DEVICE PROPERTIES}
+
+Our discussions on assigning execution resources to blocks raise an important question. How do we find out the amount of resources available? When a CUDA application executes on a system, how can it determine the number of SMs in a device and the number of blocks and threads that can be assigned to each SM? Other resources have yet to be discussed that can be relevant to the execution of a CUDA application. In general, many modern applications are designed to execute on a wide variety of hardware systems. The application often needs to query the available resources and capabilities of the underlying hardware in order to take advantage of the more capable systems while compensating for the less capable systems.
+
+In CUDA C, a built-in mechanism exists for a host code to query the properties of the devices available in the system. The CUDA runtime system (device driver) has an API function cudaGetDeviceCount that returns the number of available CUDA devices in the system. The host code can determine the number of available CUDA devices by using the following statements:
+
+\begin{lstlisting}
+	int dev_count;
+	cudaGetDeviceCount(&dev_count);
+\end{lstlisting}
+
+A  modern PC system often has two  or more CUDA devices. The reason is that many PC systems come with one or more "intergrated" GPUs.These GPUs are the default graphics units and provide rudimentary capabilities and hardware resources to perform minimal graphics functionalities for modern Windows-based user interfaces. Most CUDA applications will not perform very well on these integrated devices. This weakness would be a reason for the host code to iterate through all the available devices, query their resources and capabilities, and choose the ones with adequate resources to execute the application satisfactorily.
+
+The CUDA runtime numbers all available devices in the system from 0 to
+dev\_count-1 . It provides an API function cudaGetDeviceProperties that returns the properties of the device whose number is given as an argument. We can use the following statements in the host code to iterate through the available devices and query their properties:
+
+\begin{lstlisting}
+	cudaDeviceProp dev_prop;
+	for (int i = 0; i < dev_count; i++) {
+		cudaGetDeviceProperties(&dev_prop, i);
+		//decide if device has sufficient resources and capabilities
+	}
+\end{lstlisting}
+
+The built-in type cudaDeviceProp is a C struct type with fields representing the properties of a CUDA device. The reader is referred to the CUDA C Programming Guide for all fields of the type. We will discuss a few of these fields that are particularly relevant to the assignment of execution resources to threads. We assume that the properties are returned in the dev\_prop variable whose fields are set by the cudaGetDeviceProperties function. If the reader chooses to name the variable differently,
+the appropriate variable name will obviously need to be substituted in the following discussion.
+
+As the name suggests, the field dev\_prop.maxThreadsPerBlock indicates the maximal number of threads allowed in a block in the queried device. Some devices allow up to 1024 threads in each block and other devices allow fewer. Future devices may even allow more than 1024 threads per block. Therefore, the available devices should be queried, and the ones that will allow a sufficient number of threads in each block should be determined. 
+
+The number of SMs in the device is given in dev\_prop.multiProcessorCount . As we discussed earlier, some devices have only a small number of SMs (e.g., two) and some have a much larger number of SMs (e.g., 30). If the application requires a large number of SMs in order to achieve satisfactory performance, it should definitely
+check this property of the prospective device. Furthermore, the clock frequency of the device is in dev\_prop.clockRate . The combination of the clock rate and the number of SMs provides a good indication of the hardware execution capacity of the device.
+
+The host code can find the maximal number of threads allowed along each dimension of a block in fields dev\_prop.maxThreadsDim[0], dev\_prop.maxThreadsDim[1], and dev\_prop.maxThreadsDim[2] (for the x, y, and z dimensions).
+Such information can be used for an automated tuning system to set the range of block dimensions when evaluating the best performing block dimensions for the  underlying hardware. Similarly, it can determine the maximal number of blocks allowed along each dimension of a grid in dev\_prop.maxGridSize[0] , dev\_prop.
+maxGridSize[1] , and dev\_prop.maxGridSize[2] (for the x, y, and z dimensions). This information is typically used to determine whether a grid can have sufficient threads to handle the entire data set or whether some iteration is needed.
+
+The cudaDeviceProp type has many more fields. We will discuss them as we
+introduce the concepts and features that they are designed to reflect.
+
+\subsection{THREAD SCHEDULING AND LATENCY TOLERANCE}
+
+Thread scheduling is strictly an implementation concept. Thus, it must be discussed in the context of specific hardware implementations. In the majority of implementations to date, a block assigned to an SM is further divided into 32 thread units called warps. The size of warps is implementation-specific. Warps are not part of the CUDA specification; however, knowledge of warps can be helpful in understanding
+and optimizing the performance of CUDA applications on particular generations of CUDA devices. The size of warps is a property of a CUDA device, which is in the warpSize field of the device query variable ( dev\_prop in this case).
+
+The warp is the unit of thread scheduling in SMs. Fig. 3.13 shows the division
+of blocks into warps in an implementation. Each warp consists of 32 threads of consecutive threadIdx values: thread 0 through 31 form the first warp, 32 through 63 the second warp, and so on. In this example, three blocks—Block 1, Block 2, and Block3—are assigned to an SM. Each of the three blocks is further divided into warps for scheduling purposes.
+
+We can calculate the number of warps that reside in an SM for a given block size and a given number of blocks assigned to each SM. In Fig. 3.13, if each block has 256 threads, we can determine that each block has 256/32 or 8 warps. With three blocks in each SM, we have 8 × 3 = 24 warps in each SM.
+
+An SM is designed to execute all threads in a warp following the Single
+Instruction, Multiple Data (SIMD) model—i.e., at any instant in time, one instruction is fetched and executed for all threads in the warp. This situation is illustrated in Fig. 3.13 with a single instruction fetch/dispatch shared among execution units (SPs) in the SM. These threads will apply the same instruction to different portions of the data. Consequently, all threads in a warp will always have the same execution timing.
+
+Fig. 3.13 also shows a number of hardware Streaming Processors (SPs) that actually execute instructions. In general, there are fewer SPs than the threads assigned to each SM; i.e., each SM has only enough hardware to execute instructions from a small subset of all threads assigned to the SM at any point in time. In early GPU designs, each SM can execute only one instruction for a single warp at any given instant. In recent designs, each SM can execute instructions for a small number of warps at any point in time. In either case, the hardware can execute instructions for a small subset of all warps in the SM. A legitimate question is why we need to have so many warps in an SM if it can only execute a small subset of them at any instant. The answer is that this is how CUDA processors efficiently execute long-latency operations, such as global memory accesses.
+
+When an instruction to be executed by a warp needs to wait for the result of a previously initiated long-latency operation, the warp is not selected for execution.
+Instead, another resident warp that is no longer waiting for results will be selected for execution. If more than one warp is ready for execution, a priority mechanism is used to select one for execution. This mechanism of filling the latency time of operations with work from other threads is often called “latency tolerance” or “latency hiding” (see “Latency Tolerance” sidebar).
+
+Warp scheduling is also used for tolerating other types of operation latencies, such as pipelined floating-point arithmetic and branch instructions. Given a sufficient number of warps, the hardware will likely find a warp to execute at any point in time, thus making full use of the execution hardware in spite of these long-latency operations. The selection of ready warps for execution avoids introducing idle or wasted time into the execution timeline, which is referred to as zero-overhead thread
+scheduling. With warp scheduling, the long waiting time of warp instructions is “hidden” by executing instructions from other warps. This ability to tolerate long-latency operations is the main reason GPUs do not dedicate nearly as much chip area to cache memories and branch prediction mechanisms as do CPUs. Thus, GPUs can dedicate more of its chip area to floating-point execution resources.
+
+\textbf{LATENCY TOLERANCE} 延迟容忍性在日常生活中也是必需的。例如，在邮局中，每个试图寄送包裹的人理想情况下应该在前往服务柜台之前填写好所有必要的表格和标签。但是，有些人会等待服务台职员告诉他们应该填写哪个表格以及如何填写表格。
+
+当服务柜台前排队的人很多时，服务员的生产率必须最大化。让一个人在所有人等待时在服务员面前填写表格不是一种高效的方法。服务员应该在那个人填写表格时帮助其他等待的顾客。这些其他顾客已经“准备好了”，不应该被需要更长时间填写表格的顾客阻塞。
+
+因此，一个好的服务员会礼貌地要求第一个顾客在填写表格时离开服务柜台，这样他/她就可以为其他顾客提供服务。在大多数情况下，当该顾客完成表格并且服务员完成当前顾客的服务时，该顾客会立即被服务，而不是去排队的末尾。
+
+我们可以将这些邮局顾客视为warp，将服务员视为硬件执行单元。需要填写表格的顾客对应于一个需要执行长延迟操作的warp。
+
+
+现在我们来做一个简单的练习。假设一个CUDA设备每个SM最多可以容纳8个块和1024个线程，取决于先达到限制的那个。此外，它允许每个块最多有512个线程。对于图像模糊，我们应该使用8×8、16×16还是32×32的线程块？为了回答这个问题，我们可以分析每种选择的优缺点。如果我们使用8×8的块，每个块只有64个线程。我们将需要1024/64 = 12个块来充分占用一个SM。然而，每个SM只能允许最多8个块；因此，我们最终只能在每个SM中使用64×8 = 512个线程。这个有限的数量意味着SM执行资源可能会被低效利用，因为可用于在长延迟操作周围调度的warp较少。
+
+16×16的块会产生256个线程，意味着每个SM可以容纳1024/256 = 4个块。这个数字在8块的限制范围内，并且是一个好的配置，因为它将允许我们在每个SM中拥有充分的线程容量和最大数量的warp来调度长延迟操作周围的线程。32×32的块会给出每个块1024个线程，超过了该设备每个块512个线程的限制。只有16×16的块允许每个SM分配最大数量的线程。
+
+请注意，这只是一个过于简化的练习。正如我们将在第4章“内存和数据局部性”中解释的那样，在确定最适合的块维度时，还必须考虑\textbf{寄存器和共享内存}等其他资源的使用情况。此练习强调了块数限制和每个SM可分配的线程数限制之间的相互作用。
+
+\subsection{SUMMARY}
+
+The kernel execution configuration parameters define the dimensions of a grid and its blocks. Unique coordinates in blockIdx and threadIdx allow threads of a grid to identify themselves and their domains of data. It is the responsibility of the programmer to use these variables in kernel functions so that the threads can properly identify the portion of the data to process. This model of programming compels the programmer to organize threads and their data into hierarchical and multidimensional organizations.
+
+Once a grid is launched, its blocks can be assigned to SMs in an arbitrary order, resulting in the transparent scalability of CUDA applications. The transparent scalability comes with a limitation: threads in different blocks cannot synchronize with
+one another. To allow a kernel to maintain transparent scalability, the simple method
+for threads in different blocks to synchronize with each other is to terminate the ker-
+nel and start a new kernel for the activities after the synchronization point.
+
+Threads are assigned to SMs for execution on a block-by-block basis. Each CUDA
+device imposes a potentially different limitation on the amount of resources available
+in each SM. Each CUDA device sets a limit on the number of blocks and the number
+of threads each of its SMs can accommodate, whichever becomes a limitation first.
+For each kernel, one or more of these resource limitations can become the limiting
+factor for the number of threads that simultaneously reside in a CUDA device.
+
+Once a block is assigned to an SM, it is further partitioned into warps. All threads
+in a warp have identical execution timing. At any time, the SM executes instruc-
+tions of only a small subset of its resident warps. This condition allows the other
+warps to wait for long-latency operations without slowing down the overall execu-
+tion throughput of the massive number of execution units.
+
+Q: 详说不同块中的线程进行同步的简单方法
+
+A:在CUDA中，不同块中的线程不能直接进行同步，因为它们分别被分配到不同的SM中运行。然而，有一种简单的方法，可以让不同块中的线程进行同步，即在同步点处终止当前的kernel函数并启动一个新的kernel函数。
+
+具体地说，当需要进行同步时，可以在kernel函数的某个位置使用CUDA提供的同步函数（如\_\_syncthreads()）来进行同步。在这个同步函数被调用的位置，所有线程都会停止执行，等待其他块中的线程完成它们的任务。一旦所有线程都到达同步点，kernel函数会终止，并启动一个新的kernel函数，来执行同步点之后的任务。
+
+需要注意的是，这种方法虽然简单，但是会带来一定的开销，因为在进行同步时需要启动一个新的kernel函数。此外，由于每个kernel函数的启动都需要一定的时间，所以频繁的kernel函数启动也会降低程序的性能。因此，在实际编程中，需要根据具体的应用场景，选择合适的同步策略，以达到最佳的性能和效率。
+
+
 \end{document}
