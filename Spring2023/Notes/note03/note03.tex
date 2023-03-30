@@ -271,6 +271,10 @@ SM和线程之间的联系是，SM是GPU硬件上的执行单元，可以处理�
 
 Our discussions on assigning execution resources to blocks raise an important question. How do we find out the amount of resources available? When a CUDA application executes on a system, how can it determine the number of SMs in a device and the number of blocks and threads that can be assigned to each SM? Other resources have yet to be discussed that can be relevant to the execution of a CUDA application. In general, many modern applications are designed to execute on a wide variety of hardware systems. The application often needs to query the available resources and capabilities of the underlying hardware in order to take advantage of the more capable systems while compensating for the less capable systems.
 
+应用程序通常需要查询底层硬件的可用资源和能力，以便在利用更强大的系统的同时，对较不强大的系统进行补偿。
+
+在CUDA C中，存在一种内置机制，用于让主机代码查询系统中可用设备的属性。CUDA运行时系统（设备驱动程序）具有一个名为cudaGetDeviceCount的API函数，该函数返回系统中可用的CUDA设备数量。主机代码可以使用以下语句确定可用的CUDA设备数量：
+
 In CUDA C, a built-in mechanism exists for a host code to query the properties of the devices available in the system. The CUDA runtime system (device driver) has an API function cudaGetDeviceCount that returns the number of available CUDA devices in the system. The host code can determine the number of available CUDA devices by using the following statements:
 
 \begin{lstlisting}
@@ -279,6 +283,10 @@ In CUDA C, a built-in mechanism exists for a host code to query the properties o
 \end{lstlisting}
 
 A  modern PC system often has two  or more CUDA devices. The reason is that many PC systems come with one or more "intergrated" GPUs.These GPUs are the default graphics units and provide rudimentary capabilities and hardware resources to perform minimal graphics functionalities for modern Windows-based user interfaces. Most CUDA applications will not perform very well on these integrated devices. This weakness would be a reason for the host code to iterate through all the available devices, query their resources and capabilities, and choose the ones with adequate resources to execute the application satisfactorily.
+
+虽然可能不太明显，但现代PC系统通常具有两个或更多的CUDA设备。这是因为许多PC系统配备了一个或多个“集成”GPU。这些GPU是默认的图形单元，为现代基于Windows的用户界面提供最基本的功能和硬件资源。大多数CUDA应用程序在这些集成设备上的性能不佳。这是主机代码迭代所有可用设备、查询其资源和能力，并选择具有足够资源以令应用程序令人满意地执行的设备的原因。
+
+CUDA运行时将系统中所有可用设备从0到dev\_count-1进行编号。它提供了一个API函数cudaGetDeviceProperties，该函数返回其编号作为参数的设备的属性。我们可以在主机代码中使用以下语句来迭代可用设备并查询其属性：
 
 The CUDA runtime numbers all available devices in the system from 0 to
 dev\_count-1 . It provides an API function cudaGetDeviceProperties that returns the properties of the device whose number is given as an argument. We can use the following statements in the host code to iterate through the available devices and query their properties:
