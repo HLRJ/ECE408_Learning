@@ -149,10 +149,84 @@ void blurKernel(unsigned char * in, unsigned char * out, int w, int h){
 	\label{fig:1}
 \end{figure}
 
-Overview of the CUDA device memory model
 
 \begin{itemize}
-	\item 
+	\item  Global memory
+	\item  Constant memory
+	\item  Registers and shared memory
 \end{itemize}
+
+常量内存支持设备进行短延迟、高带宽的只读访问，寄存器和共享内存在芯片上。
+
+驻留在这些类型的内存中的变量可以以非常高的速度以高度并行的方式进行访问。寄存器分配给各个线程；每个线程只能访问自己的寄存器。内核函数通常使用寄存器来保存每个线程私有的频繁访问的变量。共享内存位置分配给线程块；块中的所有线程都可以访问分配给块的共享内存变量。共享内存是线程通过共享其输入数据和中间结果相互合作的有效手段。通过在CUDA内存类型中声明CUDA变量，CUDA程序员可以指定变量的可见性和访问速度。
+
+Q:线程块的size不是自己定义的吗？也就说共享内存的大小是灵活的吗
+
+A: 是的，线程块的大小是由程序员自己定义的，可以在启动 CUDA kernel 函数时指定。因此，共享内存的大小也是可以灵活设定的，程序员可以根据需要定义合适的大小。共享内存的大小和线程块的大小有一定关系，因为共享内存是分配给线程块的，所以线程块的大小会影响共享内存的大小。一般来说，线程块的大小越大，分配给它的共享内存也就越大。但是需要注意的是，共享内存的大小也受到硬件限制，因此程序员需要根据硬件的实际情况来设定线程块和共享内存的大小，以达到最佳的性能。
+
+为了完全理解寄存器、共享内存和全局内存之间的区别，我们需要更详细地了解这些不同类型的内存在现代处理器中是如何实现和使用的。几乎所有现代处理器都源于1945年由约翰·冯·诺伊曼提出的模型，该模型显示在图4.7中。CUDA设备也不例外。CUDA设备中的全局内存映射到图4.7中的Memory框。处理器框对应于我们今天通常看到的处理器芯片边界。全局内存位于处理器芯片外部，并采用DRAM技术实现，这意味着访问延迟长，访问带宽相对较低。寄存器对应于冯·诺伊曼模型的寄存器文件。寄存器文件位于处理器芯片上，这意味着访问延迟非常短，访问带宽比全局内存高得多。在典型设备中，寄存器文件的聚合访问带宽至少比全局内存高两个数量级。此外，当变量存储在寄存器中时，它的访问不再消耗芯片外的全局内存带宽。这种减少的带宽消耗将反映为增加的计算对全局内存访问比。
+
+一个更微妙的问题是，每次访问寄存器需要的指令数比访问全局内存少。大多数现代处理器的算术指令都有“内置”的寄存器操作数。例如，浮点加法指令可能采用以下形式：
+
+fadd r1，r2，r3
+
+其中r2和r3是寄存器号，指定寄存器文件中存储输入操作数值的位置。存储浮点加法结果值的位置由r1指定。因此，当算术指令的操作数在寄存器中时，不需要额外的指令来将操作数值提供给算术逻辑单元（ALU），其中执行算术计算。
+
+Q: CPU GPU的寄存器又有什么区别与联系
+
+A: GPU和CPU的寄存器在作用和功能上是相似的，它们都是用来存储指令和数据的临时存储器。然而，由于GPU和CPU的体系结构和用途不同，它们的寄存器在一些方面存在区别。
+
+首先，GPU上的寄存器数目通常比CPU多得多。这是因为GPU是设计用来处理大规模数据并行的任务，每个线程都需要有自己的寄存器，以存储临时数据和中间结果。此外，GPU通常会有多个线程块同时执行，每个线程块都需要有自己的寄存器。
+
+其次，GPU上的寄存器具有更快的访问速度和更低的访问延迟。这是因为GPU的寄存器通常是嵌入到芯片中的，与处理器核心的距离更近，访问速度更快。此外，GPU上的寄存器还通常会采用更快的存储技术，例如SRAM，以提高访问速度和响应时间。
+
+最后，GPU上的寄存器通常是由编译器和程序员管理的，而不是由操作系统管理。这是因为GPU通常被用来执行高性能计算任务，需要更多的控制和优化来充分利用硬件资源。因此，程序员需要手动管理寄存器的使用和分配，以确保最大的性能和效率。
+
+\subsubsection{A TILED MATRIX MULTIPLICATION KERNEL}
+
+请注意，共享内存变量的范围是块。因此，为每个块创建一对Mds和Nds，并且块中的所有线程都可以访问相同的Mds和Nds非常重要，因为块中的所有线程都必须可以访问由它们的同行加载到Mds和Nds中的M和N元素，以便它们可以使用这些值来满足它们的输入需求。
+
+
+\begin{lstlisting}
+	__global__ void MatrixMulKernel(float* d_M, float* d_N, float* d_P,
+	int Width) {
+		
+		__shared__ float Mds[TILE_WIDTH][TILE_WIDTH];
+		__shared__ float Nds[TILE_WIDTH][TILE_WIDTH];
+		
+		int bx = blockIdx.x; int by = blockIdx.y;
+		int tx = threadIdx.x; int ty = threadIdx.y;
+		
+		 // Identify the row and column of the d_P element to work on
+		int Row = by * TILE_WIDTH + ty;
+		int Col = bx * TILE_WIDTH + tx;
+		
+		float Pvalue = 0;
+		// Loop over the d_M and d_N tiles required to compute d_P element
+		for (int ph = 0; ph < Width/TILE_WIDTH; ++ph) {
+
+		// Collaborative loading of d_M and d_N tiles into shared memory
+		Mds[ty][tx] = d_M[Row*Width + ph*TILE_WIDTH + tx];
+		Nds[ty][tx] = d_N[(ph*TILE_WIDTH + ty)*Width + Col];
+		__syncthreads();
+
+		for (int k = 0; k < TILE_WIDTH; ++k) {
+				Pvalue += Mds[ty][k] * Nds[k][tx];
+		}
+		__syncthreads();
+
+		}
+		d_P[Row*Width + Col] = Pvalue;
+
+	}
+\end{lstlisting}
+
+tiled算法提供了重大的优势。对于矩阵乘法而言，全局内存访问的量将减少 TILE\_WIDTH 倍。如果使用 16 x 16 的瓦片，则全局内存访问量可以减少 16 倍。这将将计算与全局内存访问的比率从 1 提高到 16。这种改进使得 CUDA 设备的内存带宽可以支持接近其峰值性能的计算速率。例如，具有 150 GB/s 全局内存带宽的设备可以达到 ((150/4)*16) = 600 GFLOPS！
+
+尽管tiled矩阵乘法内核的性能提升非常卓越，但它包含了一些简化的假设。首先，假设矩阵的宽度是线程块宽度的倍数。这个假设会防止内核正确处理任意大小的矩阵。第二个假设是矩阵是方阵，这在现实生活中并不总是正确的。在下一节中，我们将介绍一个带有边界检查的内核，可以消除这些假设。
+
+\subsubsection{BOUNDARY CHECKS}
+
+
 
 \end{document}
